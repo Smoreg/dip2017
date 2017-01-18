@@ -3,7 +3,6 @@ import numpy as np
 import math
 from time import gmtime, strftime
 
-
 DEBUG = True
 
 
@@ -293,44 +292,98 @@ class VarSpace:
     :param curr_var: номер для следующей новой перменной
     :param variables: list переменных
     :param cacl_on_run: рассчет доп переменных на ходу не храня их формулы. Только значения и необходимые стат параметры
+
+    структура перемнных
+
+    1) variables np.array uint32 [... , 2]
+       номер/значение/длина/ранг
+       [ 2,  1, 1, 1],
+       ...
+       [20,  1, 33, 22],
     """
 
     def __init__(self, variables, cipher, save_flag=False, cacl_on_run=False):
+
         if save_flag:
-            #safe file path
+            # safe file path
             self.sf = open("VarSpace{}_{}".format(
-                hex(id(self))[2:],strftime("%Y%m%d_%H%M", gmtime())
+                hex(id(self))[2:], strftime("%Y%m%d_%H%M", gmtime())
             ))
         else:
             self.sf = save_flag
 
         self.cacl_on_run = cacl_on_run
-        self.variables = variables  # plaintext + ciphertext
-        self.cipher = cipher
-        self.curr_var = 111  # TODO
 
-    def make_new_var(self, variable, op='XOR', precalc=False, uniq=False):
+        self.variables = self._init_vars(variables)
+        self.cipher = cipher
+        self.curr_var = np.max(self.variables[:, 0])
+
+    # def __ixor__(self, other):
+    #     # в любом случае константы xor ятся
+    #     self_c = self.is_const()
+    #     oth_c = other.is_const()
+    #     if self_c or oth_c:
+    #         # если один полином - константа
+    #         if self_c and not (oth_c):
+    #             self.form = np.copy(other.form)
+    #         self.const ^= other.const
+    #
+    #     else:
+    #
+    #         if self.is_need_new(other, self.th):
+    #             print('MORE')
+    #             # новые переменные #TODO
+    #             # TODO1
+    #
+    #         else:
+    #             self.form = self.xor_summands(np.vstack((other.get_summands(), self.get_summands())))
+    #             self.const ^= other.const
+    #     return self
+c
+
+    def _init_vars(self, variables):
+        res = np.zeros([*variables.shape, 4], dtype=np.uint32)
+        res[...:0] = np.arange(2 + variables.shape[0])
+        res[...:1] = variables
+        res[...:2] += 1
+        res[...:3] += 1
+        return res
+
+    def make_new_var(self, variables, op='XOR'):
         """
         VarSpace получает выражение которое нужно превратить в новую переменную
 
-        :param variable: Выражение, которое нужно превратить в переменную. Может быть двух видов
+        :param variables: Выражение, которое нужно превратить в переменную. Может быть двух видов
          1. ZhegalkinPolynomial - для унарных операций
-         2. [ZhegalkinPolynomial, ZhegalkinPolynomial] - для бинарный операций.
+         2. lsit[ZhegalkinPolynomial] - для бинарный операций.
         :param op: операция
          1. Унарные
-            1.1 XOR - сложение по модулю 2
+            -
          2. Бинарные
-            1.1 Sbox_{SBOX_NAME} - замена по одному из имеющихся sbox`y
-        :param precalc: Если флаг указан, для variables вычисляется решающий вектор.
-        :param uniq: Проверяет решающий вектор на уникальность, если такая перменная уже есть - возвращает её номер.
-         Запускает precalc
+            2.1 XOR - сложение по модулю 2. 2 полнома
+            2.2 SBOX_{SBOX_NAME} - замена по одному из имеющихся sbox`y. Число полиномов зависит от sbox
 
         :return: Номер новой переменной
         :rtype: numpy.uint32
         """
+        if op == 'XOR':
+            pass
         pass  # TODO
 
-    # def get_variable(self, variables=None):
+    def xor_var(self, poly1, poly2):
+
+        if DEBUG and (poly1.is_const() or poly2.is_const()):
+            raise self.VarSpaceException('Const in var space!')
+
+    def sbox_var(self, poly, sbox_name):
+        pass
+
+    def add_new_var(self, var):
+        # if DEBUG and()
+        pass
+
+    class VarSpaceException(Exception):
+        pass
 
 
 class Kuznechik:
