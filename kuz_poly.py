@@ -1,13 +1,15 @@
 from copy import deepcopy as copy
 import numpy as np
 import math
+from time import gmtime, strftime
+
 
 DEBUG = True
 
 
 class ZhegalkinPolynomial:
     # Legend
-    # #
+    # th = 8
     # [1, 0, 0, 0, 0, 1, 0, 0],
     # [1, 1, 0, 1, 0, 0, 0, 1],
     # [0, 0, 0, 1, 1, 0, 1, 0],
@@ -17,7 +19,8 @@ class ZhegalkinPolynomial:
     # [0, 0, 1, 1, 0, 1, 1, 1],
     # [1, 0, 0, 0, 0, 0, 0, 0],
     # [0, 0, 1, 1, 1, 1, 0, 1])
-    #
+    # ....
+
     # 'x1 ⊕ x6',
     # 'x1 ⊕ x2 ⊕ x4 ⊕ x8',
     # 'x4 ⊕ x5 ⊕ x7',
@@ -27,14 +30,16 @@ class ZhegalkinPolynomial:
     # 'x3 ⊕ x4 ⊕ x6 ⊕ x7 ⊕ x8',
     # 'x1',
     # 'x3 ⊕ x4 ⊕ x5 ⊕ x6 ⊕ x8']
+    # ...
     # ⊕ self.const
 
-    def __init__(self, th, cipher=None):
+    def __init__(self, cipher):
         self.main_cipher = cipher
 
-        self.h = th ** 2
-        self.w = 2 ** th
-        self.th = th
+        self.th = cipher.th
+        self.h = 2 ** cipher.th
+        self.w = cipher.th
+
         self.form = np.zeros((self.h, self.w), dtype=np.int32)
         self.const = False
 
@@ -59,14 +64,14 @@ class ZhegalkinPolynomial:
 
         else:
 
-            # новые переменные #TODO
             if self.is_need_new(other, self.th):
                 print('MORE')
-            else:
-                print('NO MORE')
+                # новые переменные #TODO
+                # TODO1
 
-            self.form = self.xor_summands(np.vstack((other.get_summands(), self.get_summands())))
-            self.const ^= other.const
+            else:
+                self.form = self.xor_summands(np.vstack((other.get_summands(), self.get_summands())))
+                self.const ^= other.const
         return self
 
     def __xor__(self, other):
@@ -75,7 +80,7 @@ class ZhegalkinPolynomial:
         return res
 
     def __deepcopy__(self, *args, **kwargs):
-        my_copy = ZhegalkinPolynomial(self.th, self.main_cipher)
+        my_copy = ZhegalkinPolynomial(self.main_cipher)
         my_copy.const = self.const
         my_copy.form = np.copy(self.form)
         return my_copy
@@ -164,7 +169,10 @@ class ZhegalkinPolynomial:
         if DEBUG and summands.dtype != np.int32:
             raise self.ZhegalkinException('summands bad type {}'.format(summands.dtype))
         else:
-            self.form[empty_summands_rooms[0]:empty_summands_rooms[0] + len(summands)] = summands
+            if len(summands.shape) == 1:
+                self.form[empty_summands_rooms[0]] = summands
+            else:
+                self.form[empty_summands_rooms[0]:empty_summands_rooms[0] + len(summands)] = summands
 
     def is_const(self):
         return ~np.any(self.form)
@@ -196,16 +204,6 @@ class ZhegalkinPolynomial:
         pass
 
 
-class VarSpace:
-    """
-    создан для хранения всех переменных, как основных так и дополнительных.
-    Создается в Kuznechik, далее на него ссыляются из всех классов
-    """
-
-    def __init__(self, variables):
-        self.variables = variables  # plaintext + ciphertext
-
-
 class PolyList:
     def __init__(self, variables, th, cipher):
         """
@@ -219,7 +217,7 @@ class PolyList:
         self.main_cipher = cipher
         if isinstance(variables, bytearray):
             variables = np.unpackbits(variables).astype(np.uint32)
-        self.variables = [ZhegalkinPolynomial(th, self.main_cipher) for _ in variables]
+        self.variables = [ZhegalkinPolynomial(self.main_cipher) for _ in variables]
         for number, variable in enumerate(variables):
             if variable in [0, 1]:
                 self.variables[number].set_const(variable)
@@ -284,6 +282,55 @@ class PolyList:
 
     class PolyError(Exception):
         pass
+
+
+class VarSpace:
+    """
+    создан для хранения всех переменных, как основных так и дополнительных.
+    Создается в Kuznechik, далее на него ссыляются из всех классов
+    :param sf: файл в которые будут сохраняться данные
+    :param cipher: ссылка на текущий шифрующий класс
+    :param curr_var: номер для следующей новой перменной
+    :param variables: list переменных
+    :param cacl_on_run: рассчет доп переменных на ходу не храня их формулы. Только значения и необходимые стат параметры
+    """
+
+    def __init__(self, variables, cipher, save_flag=False, cacl_on_run=False):
+        if save_flag:
+            #safe file path
+            self.sf = open("VarSpace{}_{}".format(
+                hex(id(self))[2:],strftime("%Y%m%d_%H%M", gmtime())
+            ))
+        else:
+            self.sf = save_flag
+
+        self.cacl_on_run = cacl_on_run
+        self.variables = variables  # plaintext + ciphertext
+        self.cipher = cipher
+        self.curr_var = 111  # TODO
+
+    def make_new_var(self, variable, op='XOR', precalc=False, uniq=False):
+        """
+        VarSpace получает выражение которое нужно превратить в новую переменную
+
+        :param variable: Выражение, которое нужно превратить в переменную. Может быть двух видов
+         1. ZhegalkinPolynomial - для унарных операций
+         2. [ZhegalkinPolynomial, ZhegalkinPolynomial] - для бинарный операций.
+        :param op: операция
+         1. Унарные
+            1.1 XOR - сложение по модулю 2
+         2. Бинарные
+            1.1 Sbox_{SBOX_NAME} - замена по одному из имеющихся sbox`y
+        :param precalc: Если флаг указан, для variables вычисляется решающий вектор.
+        :param uniq: Проверяет решающий вектор на уникальность, если такая перменная уже есть - возвращает её номер.
+         Запускает precalc
+
+        :return: Номер новой переменной
+        :rtype: numpy.uint32
+        """
+        pass  # TODO
+
+    # def get_variable(self, variables=None):
 
 
 class Kuznechik:
