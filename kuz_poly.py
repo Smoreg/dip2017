@@ -1,55 +1,45 @@
-from copy import deepcopy as copy
-import numpy as np
-import math
+from copy import deepcopy
 from time import gmtime, strftime
+
+import numpy as np
 
 DEBUG = True
 
 
 class ZhegalkinPolynomial:
-    # Legend
-    # th = 8
-    # [1, 0, 0, 0, 0, 1, 0, 0],
-    # [1, 1, 0, 1, 0, 0, 0, 1],
-    # [0, 0, 0, 1, 1, 0, 1, 0],
-    # [1, 1, 1, 1, 1, 1, 1, 0],
-    # [0, 0, 1, 1, 1, 1, 1, 0],
-    # [1, 1, 1, 1, 0, 1, 1, 0],
-    # [0, 0, 1, 1, 0, 1, 1, 1],
-    # [1, 0, 0, 0, 0, 0, 0, 0],
-    # [0, 0, 1, 1, 1, 1, 0, 1])
-    # ....
-
-    # 'x1 ⊕ x6',
-    # 'x1 ⊕ x2 ⊕ x4 ⊕ x8',
-    # 'x4 ⊕ x5 ⊕ x7',
-    # 'x1 ⊕ x2 ⊕ x3 ⊕ x4 ⊕ x5 ⊕ x6 ⊕ x7',
-    # 'x3 ⊕ x4 ⊕ x5 ⊕ x6 ⊕ x7',
-    # 'x1 ⊕ x2 ⊕ x3 ⊕ x4 ⊕ x6 ⊕ x7',
-    # 'x3 ⊕ x4 ⊕ x6 ⊕ x7 ⊕ x8',
-    # 'x1',
-    # 'x3 ⊕ x4 ⊕ x5 ⊕ x6 ⊕ x8']
-    # ...
-    # ⊕ self.const
-
     def __init__(self, cipher):
-        self.main_cipher = cipher
 
-        self.th = cipher.th
-        self.h = 2 ** cipher.th
-        self.w = cipher.th
+        self.cipher = cipher  # Шифр использующий данный класс
+        self.th = cipher.th  # Максимальное число мономов (без константы)
+        self.monom_max_deg = cipher.max_deg  # Максимальное число пермеенных в полиноме
 
-        self.form = np.zeros((self.h, self.w), dtype=np.int32)
-        self.const = False
+        self.form = np.zeros((self.th, self.monom_max_deg), dtype=np.int32)
+        self.const = False  # TODO speedup property set/get
+
+        # Legend
+        # th = 4
+        # [3, 4, 9, ... 0, 0, 0, 0],
+        # [2, 3, 5, ..., 0, 0, 0, 0],
+        # [6, 7, 0, ..., 0, 0, 0, 0],
+        # [0, 0, 0, ..., 0, 0, 0, 0],
+        # ...
+        # 'x3 x4 x9 ⊕ x2 x3 x5 ⊕ x6 x7 ⊕ self.const
 
     def __repr__(self):
-        if self.get_vars():
-            return "{} ^ {}".format(int(self.const), "some vars")
+        if not self.is_const():
+            res = list()
+            for summand in self.get_summands():
+                tmp = ''
+                for var in summand:
+                    tmp += "x{}".format(var)
+                res.append(tmp)
+            res = " ⊕ ".join(res)
+            return "{} ^ {}".format(res, int(self.const))
         else:
             return str(int(self.const))
 
     def __eq__(self, other):
-        return np.all(self.form == other.form) and (self.const == other.const)
+        return (self.const == other.const) and np.all(self.form == other.form)
 
     def __ixor__(self, other):
         # в любом случае константы xor ятся
@@ -57,40 +47,41 @@ class ZhegalkinPolynomial:
         oth_c = other.is_const()
         if self_c or oth_c:
             # если один полином - константа
-            if self_c and not (oth_c):
+            if self_c and not oth_c:
                 self.form = np.copy(other.form)
             self.const ^= other.const
-
         else:
 
-            if self.is_need_new(other, self.th):
-                print('MORE')
-                # новые переменные #TODO
-                # TODO1
-
+            if self.get_vars_num() + other.get_vars_num() > self.monom_max_deg:
+                print('MORE')  # TODO new var
             else:
-                self.form = self.xor_summands(np.vstack((other.get_summands(), self.get_summands())))
-                self.const ^= other.const
+                state, tmp_form = self.xor_summands(other)
+                if state == 'need new':
+                    print('MORE')  # TODO new var
+                elif state == 'keep':
+                    self.form = tmp_form
+                    self.const ^= other.const
+                else:
+                    raise self.ZhegalkinException('Bad xor state {}'.format(state))
         return self
 
     def __xor__(self, other):
-        res = copy(self)
+        res = deepcopy(self)
         res ^= other
         return res
 
     def __deepcopy__(self, *args, **kwargs):
-        my_copy = ZhegalkinPolynomial(self.main_cipher)
+        my_copy = ZhegalkinPolynomial(self.cipher)
         my_copy.const = self.const
         my_copy.form = np.copy(self.form)
         return my_copy
 
-    def xor_summands(self, summands):
+    def xor_summands(self, other):
 
+        summands = np.vstack((other.get_summands(), self.get_summands()))
         sorted_idx = np.lexsort(summands.T)
         summands = summands[sorted_idx, :]
-
         res = []
-
         step_over_flag = False
 
         for num, s in enumerate(zip(summands, summands[1:])):
@@ -111,10 +102,13 @@ class ZhegalkinPolynomial:
         else:
             new_summands = []
 
-        res = np.zeros_like(self.form)
-        if len(new_summands):
-            res[:len(new_summands)] = new_summands
-        return res
+        if len(new_summands) > self.th:
+            return 'need new', new_summands
+        else:
+            res = np.zeros_like(self.form)
+            if len(new_summands):
+                res[:len(new_summands)] = new_summands
+            return 'keep', res
 
     def get_vars(self):
         """
@@ -126,20 +120,6 @@ class ZhegalkinPolynomial:
 
     def get_vars_num(self):
         return len(self.get_vars())
-
-    def is_need_new(self, other, th):
-        return len(np.unique(np.append(self.get_vars(), other.get_vars()))) > th
-
-    def new_vars(self, variables):
-        """
-        возращает переменные которые нужно добавить в список переменных
-        :param variables:
-        :return:
-        """
-        return np.setdiff1d(
-            variables,
-            self.get_vars(),
-            assume_unique=True)
 
     def set_const(self, const):
         self.const = bool(const)
@@ -226,7 +206,7 @@ class PolyList:
     def __deepcopy__(self, *args, **kwargs):
         new_variables = list()
         for var in self.variables:
-            new_variables.append(copy(var))
+            new_variables.append(deepcopy(var))
         my_copy = PolyList([], self.th, self.main_cipher)
         my_copy.variables = new_variables
         return my_copy
@@ -261,7 +241,7 @@ class PolyList:
         return len(self.variables)
 
     def __xor__(self, other):
-        res = copy(self)
+        res = deepcopy(self)
         if isinstance(other, bytearray):  # xor with const bytearray
             other = np.unpackbits(other).astype(dtype=np.bool)
             if DEBUG and len(res) != len(other):
@@ -339,7 +319,7 @@ class VarSpace:
     #             self.form = self.xor_summands(np.vstack((other.get_summands(), self.get_summands())))
     #             self.const ^= other.const
     #     return self
-c
+
 
     def _init_vars(self, variables):
         res = np.zeros([*variables.shape, 4], dtype=np.uint32)
@@ -388,6 +368,7 @@ c
 
 class Kuznechik:
     var_space = None
+    max_deg = 256
 
     def __init__(self, T, th, open_text, key, secret_bits_mask=np.array([False] * (256 + 128)), key_exp=True):
         """
@@ -401,7 +382,6 @@ class Kuznechik:
         self.T = T
         self.th = th
         self.secret_bits_mask = secret_bits_mask
-
         self.precalc = self._precalculate()
 
         self.original_plaintext = np.unpackbits(np.fromstring(open_text, dtype=np.uint8)).astype(dtype=np.bool)
@@ -461,17 +441,17 @@ class Kuznechik:
     def key_expand(self):
         kr0 = PolyList(variables=self.key[:16 * 8], th=self.th, cipher=self)
         kr1 = PolyList(variables=self.key[16 * 8:], th=self.th, cipher=self)
-        full_key = [copy(kr0), copy(kr1)]
+        full_key = [deepcopy(kr0), deepcopy(kr1)]
         for i in range(4):
             for j in range(8):
                 k = self.lp(kr0 ^ self.precalc.C[8 * i + j])
                 kr0, kr1 = k ^ kr1, kr0
-            full_key.append(copy(kr0))
-            full_key.append(copy(kr1))
+            full_key.append(deepcopy(kr0))
+            full_key.append(deepcopy(kr1))
         return full_key
 
     def encrypt(self):
-        cipher_text = copy(self.poly_plaintext)
+        cipher_text = deepcopy(self.poly_plaintext)
         with open("encrypt_steps_mykuz", "w") as myfile:  # TODEL
             for i in range(9):
                 cipher_text = self.lp(self.full_key[i] ^ cipher_text)
