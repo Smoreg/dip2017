@@ -13,7 +13,7 @@ class ZhegalkinPolynomial:
         self.th = cipher.th  # Максимальное число мономов (без константы)
         self.monom_max_deg = cipher.max_deg  # Максимальное число пермеенных в полиноме
 
-        self.form = np.zeros((self.th, self.monom_max_deg), dtype=np.int32)
+        self.form = np.zeros((self.th * 2, self.monom_max_deg), dtype=np.int32)
         self.const = False  # TODO speedup property set/get
 
         # Legend
@@ -53,7 +53,7 @@ class ZhegalkinPolynomial:
         else:
 
             if self.get_vars_num() + other.get_vars_num() > self.monom_max_deg:
-                print('MORE')  # TODO new var
+                self.cipher  # .('MORE')  # TODO new var
             else:
                 state, tmp_form = self.xor_summands(other)
                 if state == 'need new':
@@ -131,11 +131,15 @@ class ZhegalkinPolynomial:
         return np.where(np.any(self.form != np.zeros(self.form.shape[1], dtype=np.bool), axis=1))[0]
 
     def get_summands(self):
-        return self.form[:self.get_empty_summands_room_indexes()[0]]
+        empty_rooms = self.get_empty_summands_room_indexes()
+        if len(empty_rooms):
+            return self.form[:empty_rooms[0]]
+        else:
+            return self.form
 
     def add_summands(self, summands):
         """
-        Добавлет слагаемые в полином Жегалкина
+        Добавлет слагаемые в полином Жегалкина. Без проверки на уникальность
         :param summands: Массив переменных слагаемых shape == (число новых слагаемых, максимальная длина монома)
         :type summands: np.ndarray dtype = int32
         :return:
@@ -175,7 +179,7 @@ class ZhegalkinPolynomial:
                     raise self.ZhegalkinException('Unknown var(s) []'.format(diff))
             summands = self.get_summands()
             bool_vars = \
-                (np.in1d(summands, np.append(0, true_variables)).reshape(*summands.shape))
+                (np.in1d(summands, np.append([0, ], true_variables)).reshape(*summands.shape))
             bool_vars = np.logical_and.reduce(bool_vars, axis=1)
             return np.logical_xor.reduce(bool_vars, axis=0) ^ self.const
 
@@ -265,102 +269,41 @@ class PolyList:
 
 class VarSpace:
     """
-    создан для хранения всех переменных, как основных так и дополнительных.
-    Создается в Kuznechik, далее на него ссыляются из всех классов
-    :param sf: файл в которые будут сохраняться данные
-    :param cipher: ссылка на текущий шифрующий класс
-    :param curr_var: номер для следующей новой перменной
-    :param variables: list переменных
-    :param cacl_on_run: рассчет доп переменных на ходу не храня их формулы. Только значения и необходимые стат параметры
-
-    структура перемнных
-
-    1) variables np.array uint32 [... , 2]
-       номер/значение/длина/ранг
-       [ 2,  1, 1, 1],
-       ...
-       [20,  1, 33, 22],
+    Класс в который делает те операции над PolyList в результате которых может появиться новая переменная.
+    Хранит данные о переменных, а так же назначает новые.
     """
+    MAX_VARS = 100000
 
-    def __init__(self, variables, cipher, save_flag=False, cacl_on_run=False):
+    #TODO secret vars and max var num
+    def __init__(self, variables, , th, T, save_flag=False, stat_flag=False):
 
-        if save_flag:
-            # safe file path
-            self.sf = open("VarSpace{}_{}".format(
-                hex(id(self))[2:], strftime("%Y%m%d_%H%M", gmtime())
-            ))
-        else:
-            self.sf = save_flag
+        # check
+        if DEBUG:
+            if not isinstance(variables, np.array):
+                raise self.VarSpaceException('BAd variables type {}'.format(type(variables)))
 
-        self.cacl_on_run = cacl_on_run
+        self.sf = save_flag and self._new_file()
+        self.f_stat = stat_flag
+        self.th = th
+        self.T = T
+
 
         self.variables = self._init_vars(variables)
-        self.cipher = cipher
-        self.curr_var = np.max(self.variables[:, 0])
+        self.curr_var = np.max(self.variables)
 
-    # def __ixor__(self, other):
-    #     # в любом случае константы xor ятся
-    #     self_c = self.is_const()
-    #     oth_c = other.is_const()
-    #     if self_c or oth_c:
-    #         # если один полином - константа
-    #         if self_c and not (oth_c):
-    #             self.form = np.copy(other.form)
-    #         self.const ^= other.const
-    #
-    #     else:
-    #
-    #         if self.is_need_new(other, self.th):
-    #             print('MORE')
-    #             # новые переменные #TODO
-    #             # TODO1
-    #
-    #         else:
-    #             self.form = self.xor_summands(np.vstack((other.get_summands(), self.get_summands())))
-    #             self.const ^= other.const
-    #     return self
-
+    def _new_file(self):
+        return open("VarSpace{}_{}".format(
+            hex(id(self))[2:], strftime("%Y%m%d_%H%M", gmtime())
+        ))
 
     def _init_vars(self, variables):
-        res = np.zeros([*variables.shape, 4], dtype=np.uint32)
-        res[...:0] = np.arange(2 + variables.shape[0])
-        res[...:1] = variables
-        res[...:2] += 1
-        res[...:3] += 1
+        """
+        :param variables:
+        :return:
+        """
+        res = np.zeros(self.MAX_VARS, dtype=np.bool)
+        res[:len(variables)] = variables
         return res
-
-    def make_new_var(self, variables, op='XOR'):
-        """
-        VarSpace получает выражение которое нужно превратить в новую переменную
-
-        :param variables: Выражение, которое нужно превратить в переменную. Может быть двух видов
-         1. ZhegalkinPolynomial - для унарных операций
-         2. lsit[ZhegalkinPolynomial] - для бинарный операций.
-        :param op: операция
-         1. Унарные
-            -
-         2. Бинарные
-            2.1 XOR - сложение по модулю 2. 2 полнома
-            2.2 SBOX_{SBOX_NAME} - замена по одному из имеющихся sbox`y. Число полиномов зависит от sbox
-
-        :return: Номер новой переменной
-        :rtype: numpy.uint32
-        """
-        if op == 'XOR':
-            pass
-        pass  # TODO
-
-    def xor_var(self, poly1, poly2):
-
-        if DEBUG and (poly1.is_const() or poly2.is_const()):
-            raise self.VarSpaceException('Const in var space!')
-
-    def sbox_var(self, poly, sbox_name):
-        pass
-
-    def add_new_var(self, var):
-        # if DEBUG and()
-        pass
 
     class VarSpaceException(Exception):
         pass
@@ -391,13 +334,15 @@ class Kuznechik:
         self.key = np.where(secret_bits_mask[128:], np.arange(130, 386), self.original_key)
 
         self.poly_plaintext = PolyList(variables=self.original_plaintext, th=self.th, cipher=self)
-        self.poly_key = PolyList(variables=self.original_plaintext, th=self.th, cipher=self)
+        self.poly_key = PolyList(variables=self.original_key, th=self.th, cipher=self)
 
         self.var_space = VarSpace(
             variables=np.hstack((
                 self.poly_plaintext.variables,
                 self.poly_key.variables
-            ))
+            )),
+            cipher=self,
+
         )
         if key_exp:
             self.full_key = self.key_expand()

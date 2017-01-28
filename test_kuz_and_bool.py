@@ -38,13 +38,13 @@ class TestPolyZhi:
         with pytest.raises(ZhegalkinPolynomial.ZhegalkinException):
             test_var_poly_err.add_summands(np.arange(16, dtype=np.int8).reshape(2, 8) + 3)
 
-        summand1 = np.zeros(cipher.th, dtype=np.int32)
+        summand1 = np.zeros(cipher.max_deg, dtype=np.int32)
         summand1[0:2] = np.array([2, 3], dtype=np.int32)
-        summand2 = np.zeros(cipher.th, dtype=np.int32)
+        summand2 = np.zeros(cipher.max_deg, dtype=np.int32)
         summand2[0:2] = np.array([3, 4], dtype=np.int32)
 
         test_var_poly1.add_summands(np.array([summand1, summand2]))
-        test_var_poly1.add_summands(np.array([summand1, summand2, summand1 + 2]))
+        test_var_poly1.add_summands(np.array([summand1 + 2,]))
 
         assert (not test_var_poly1.is_const())
         assert (not (test_var_poly1 ^ test_const_poly).is_const())
@@ -54,10 +54,6 @@ class TestPolyZhi:
         test_var_poly1 ^= test_var_poly2
 
         assert (tmp == test_var_poly1)
-
-        #
-        # print('---')
-        # print((test_var_poly1 ^ test_var_poly2).form)
 
 
     def test_poly_xor(self):
@@ -74,17 +70,17 @@ class TestPolyZhi:
         test_const_poly.set_const(1)
 
 
-        summand1 = np.zeros(cipher.th, dtype=np.int32)
+        summand1 = np.zeros(cipher.max_deg, dtype=np.int32)
         summand1[0:2] = np.array([2, 3], dtype=np.int32)
-        summand2 = np.zeros(cipher.th, dtype=np.int32)
+        summand2 = np.zeros(cipher.max_deg, dtype=np.int32)
         summand2[0:2] = np.array([3, 4], dtype=np.int32)
-        summand3 = np.zeros(cipher.th, dtype=np.int32)
+        summand3 = np.zeros(cipher.max_deg, dtype=np.int32)
         summand3[0:3] = np.array([2, 3, 4], dtype=np.int32)
 
 
-        test_var_poly1.add_summands(summand1.reshape(1, cipher.th))
-        test_var_poly2.add_summands(summand2.reshape(1, cipher.th))
-        test_var_poly3.add_summands(summand3.reshape(1, cipher.th))
+        test_var_poly1.add_summands(summand1.reshape(1, cipher.max_deg))
+        test_var_poly2.add_summands(summand2.reshape(1, cipher.max_deg))
+        test_var_poly3.add_summands(summand3.reshape(1, cipher.max_deg))
 
         test_var_poly_res = test_var_poly1 ^ test_var_poly2 ^ test_var_poly3
         assert np.all(test_var_poly_res.form[0] == summand1)
@@ -113,16 +109,16 @@ class TestPolyZhi:
 
 
 
-        summand1 = np.zeros(cipher.th, dtype=np.int32)
+        summand1 = np.zeros(cipher.max_deg, dtype=np.int32)
         summand1[0:2] = np.array([2, 10], dtype=np.int32)
-        summand2 = np.zeros(cipher.th, dtype=np.int32)
+        summand2 = np.zeros(cipher.max_deg, dtype=np.int32)
         summand2[0:2] = np.array([2, 3], dtype=np.int32)
-        summand3 = np.zeros(cipher.th, dtype=np.int32)
+        summand3 = np.zeros(cipher.max_deg, dtype=np.int32)
         summand3[0:2] = np.array([20, 30], dtype=np.int32)
 
-        test_var_poly1.add_summands(summand1.reshape(1, cipher.th))
-        test_var_poly2.add_summands(summand2.reshape(1, cipher.th))
-        test_var_poly3.add_summands(summand3.reshape(1, cipher.th))
+        test_var_poly1.add_summands(summand1.reshape(1, cipher.max_deg))
+        test_var_poly2.add_summands(summand2.reshape(1, cipher.max_deg))
+        test_var_poly3.add_summands(summand3.reshape(1, cipher.max_deg))
 
         with pytest.raises(ZhegalkinPolynomial.ZhegalkinException):
             test_var_poly1.solve_poly(true_variables=np.array([]))
@@ -141,7 +137,8 @@ class TestPolyZhi:
 # ------------------- Var_space
 
 class TestVarSpace:
-    pass
+    def test(self):
+        assert (1+1==2)
 
 
 # ------------------- Poly_list
@@ -200,17 +197,17 @@ class TestPolyList:
 
 
 
-        summand1 = np.zeros(cipher.th, dtype=np.int32)
+        summand1 = np.zeros(cipher.max_deg, dtype=np.int32)
         summand1[0:2] = np.array([2, 10], dtype=np.int32)
-        summand2 = np.zeros(cipher.th, dtype=np.int32)
+        summand2 = np.zeros(cipher.max_deg, dtype=np.int32)
         summand2[0:2] = np.array([2, 3], dtype=np.int32)
-        summand3 = np.zeros(cipher.th, dtype=np.int32)
+        summand3 = np.zeros(cipher.max_deg, dtype=np.int32)
         summand3[0:2] = np.array([4, 5], dtype=np.int32)
 
 
-        test_var_poly1.add_summands(summand1)
-        test_var_poly2.add_summands(summand2)
-        test_var_poly3.add_summands(summand3)
+        test_var_poly1.add_summands(summand1.reshape(1, cipher.max_deg))
+        test_var_poly2.add_summands(summand2.reshape(1, cipher.max_deg))
+        test_var_poly3.add_summands(summand3.reshape(1, cipher.max_deg))
 
         test_x0 = bytearray(b'\xfb\x04\xf6u?\xd6G\xaa\xe8E\x16\xc9OX\xed@')
         test_x1 = bytearray(b"n\xa2vrlHz\xb8]\'\xbd\x10\xdd\x84\x94\x01")
@@ -227,6 +224,8 @@ class TestPolyList:
         poly0 = PolyList(variables=test_x0, th=th, cipher=cipher)
         assert (bytearray(strxor(test_x0, test_x1))) == (na((poly0 ^ test_x1).solve_list()))
         assert (bytearray(strxor(test_x0, test_x1))) == (na((poly0 ^ test_x1).solve_list()))
+        assert (bytearray(strxor(test_x0, test_x2))) == (na((poly0 ^ test_x2).solve_list()))
+        assert (bytearray(strxor(test_x0, test_x2))) == (na((poly0 ^ test_x2).solve_list()))
 
 
 class TestKuznechik:
