@@ -1,20 +1,20 @@
-from pygost.gost3412 import GOST3412Kuz
-import pytest
+import io
+
 import numpy as np
+import pytest
+from pygost.gost3412 import GOST3412Kuz
+
 from kuz_poly import ZhegalkinPolynomial, PolyList, Kuznechik, VarSpace
 
 th = 3
 T = 5
 
-
 open_text = b'Some kuzcip test'
 rand_key = b'\xfb\x04\xf6u?\xd6G\xaa\xe8E\x16\xc9OX\xed@\xeb(L\xf6{\xc3]\xadY\xf9"c\\\x19\x1c\x9f'
 cipher = Kuznechik(T, th, open_text=open_text, key=rand_key, key_exp=False)
 
-# ------------------- Тесты полинома жегалкина
+
 class TestPolyZhi:
-
-
     def test_poly(self):
         th = 3
         T = 5
@@ -44,7 +44,7 @@ class TestPolyZhi:
         summand2[0:2] = np.array([3, 4], dtype=np.int32)
 
         test_var_poly1.add_summands(np.array([summand1, summand2]))
-        test_var_poly1.add_summands(np.array([summand1 + 2,]))
+        test_var_poly1.add_summands(np.array([summand1 + 2, ]))
 
         assert (not test_var_poly1.is_const())
         assert (not (test_var_poly1 ^ test_const_poly).is_const())
@@ -55,12 +55,9 @@ class TestPolyZhi:
 
         assert (tmp == test_var_poly1)
 
-
     def test_poly_xor(self):
         th = 3
         T = 5
-
-
 
         test_const_poly = ZhegalkinPolynomial(cipher)
         test_var_poly1 = ZhegalkinPolynomial(cipher)
@@ -69,14 +66,12 @@ class TestPolyZhi:
 
         test_const_poly.set_const(1)
 
-
         summand1 = np.zeros(cipher.max_deg, dtype=np.int32)
         summand1[0:2] = np.array([2, 3], dtype=np.int32)
         summand2 = np.zeros(cipher.max_deg, dtype=np.int32)
         summand2[0:2] = np.array([3, 4], dtype=np.int32)
         summand3 = np.zeros(cipher.max_deg, dtype=np.int32)
         summand3[0:3] = np.array([2, 3, 4], dtype=np.int32)
-
 
         test_var_poly1.add_summands(summand1.reshape(1, cipher.max_deg))
         test_var_poly2.add_summands(summand2.reshape(1, cipher.max_deg))
@@ -95,11 +90,9 @@ class TestPolyZhi:
             )
         )
 
-
     def test_poly_solve(self):
         cipher.th = 5
         T = 5
-
 
         test_var_poly1 = ZhegalkinPolynomial(cipher)
         test_var_poly2 = ZhegalkinPolynomial(cipher)
@@ -125,7 +118,7 @@ class TestPolyZhi:
         assert (test_var_poly2.solve_poly(true_variables=np.array([2, 3])))
         assert (not test_var_poly2.solve_poly(true_variables=np.array([3, ]), false_variables=np.array([2, ])))
         assert (test_var_poly3.solve_poly(true_variables=np.array([20, 5, 30])))
-        #assert (not (test_var_poly3 ^ test_var_poly2).solve_poly(true_variables=np.array([2, 3, 5, 20, 30])))
+        # assert (not (test_var_poly3 ^ test_var_poly2).solve_poly(true_variables=np.array([2, 3, 5, 20, 30])))
 
         test_var_poly2.set_const(True)
         assert (not test_var_poly2.solve_poly(true_variables=np.array([2, 3])))
@@ -134,14 +127,107 @@ class TestPolyZhi:
         # print((test_var_poly_res).form)
 
 
-# ------------------- Var_space
-
 class TestVarSpace:
-    def test(self):
-        assert (1+1==2)
+    # Examples
+    # True  vars [  1   3   6   7   9  10  12  13  14  15  17  18  20  21  23  25  26
+    # False vars [  0,  2,  4,  5,  8, 11, 16, 19, 22, 24, 27, 28, 30, 32, 33, 35, 36,
+
+    @pytest.fixture
+    def cip(self):
+        th = 4
+        T = 5
+        open_text = b'Some varspace'
+        rand_key = b'\xfb\x04\xf6u?\xd6G\xaa\xe8E\x16\xc9OX\xed@\xeb(L\xf6{\xc3]\xadY\xf9"c\\\x19\x1c\x9f'
+        return Kuznechik(T, th, open_text=open_text, key=rand_key, key_exp=False)
+
+    @pytest.fixture
+    def vs(self, cip):
+        original_plaintext = cip.original_plaintext
+        original_key = cip.original_key
+
+        return VarSpace(
+            variables=np.hstack((
+                original_plaintext,
+                original_key
+            )),
+            th=cip.th,
+            T=cip.T,
+            save_flag=True
+        )
+
+    def test_init(self, vs):
+        var_space = vs
+
+        assert var_space.variables[(np.where(cipher.original_key == 1) + 2)[5]]
+        assert not var_space.variables[(np.where(cipher.original_key == 0) + 2)[5]]
+        assert isinstance(var_space.sf, io.IOBase)
+
+    def test_xor(self, vs, cip):
+        xor_poly = ZhegalkinPolynomial(cip)
+        xor_poly.form[:6, :3] = np.array(
+            [
+                [3, 4, 5],
+                [4, 5, 0],
+                [2, 5, 0],
+                [6, 0, 0],
+                [4, 6, 7],
+                [2, 0, 0]
+            ])
+        true_vars = np.where(cipher.original_key == 1) + 2
+        solve = xor_poly.solve_poly(true_vars)
+
+        group1 = [0, 1, 2, 5]
+        group2 = [3, 4]
+
+        groups = vs.group_monoms(summands=xor_poly.form)
+
+        group1 = [groups[i] for i in group1]
+        group2 = [groups[i] for i in group2]
+
+        assert group1[1:] == group1[:-1]
+        assert group2[1:] == group2[:-1]
+        assert min(groups) >= 0
+
+        xor_res, stat = vs.new_var(xor_poly)
+
+        assert xor_res.form[0, 0] != vs.var_stat['nvar'] - 1
+        assert np.all(xor_res.form.ravel()[1:] == 0)
+        assert vs.variables[vs.var_stat['nvar'] - 1] == solve
+
+        # With long
+        xor_poly = ZhegalkinPolynomial(cip)
+        xor_poly.form[0, :8] = np.array(
+                [2, 3, 4, 5, 6, 7, 8, 9])
+        #       [4, 5, 0],
+        #       [2, 5, 0],
+        #       [6, 0, 0],
+        #       [4, 6, 7],
+        #       [2, 0, 0]
+
+        true_vars = np.where(cipher.original_key == 1) + 2
+        solve = xor_poly.solve_poly(true_vars)
+
+        group1 = [1, 2, 5]
+        group2 = [3, 4]
+        group_min = [0]
 
 
-# ------------------- Poly_list
+        groups = vs.group_monoms(summands=xor_poly.form)
+
+        group_min = [groups[i] for i in group_min]
+        assert max(group_min)<0
+        assert group_min[1:] == group_min[:-1]
+
+        xor_res, stat = vs.new_var(xor_poly)
+
+        assert xor_res.form[0, 0] != vs.var_stat['nvar'] - 1
+        assert np.all(xor_res.form.ravel()[1:] == 0)
+        assert vs.variables[vs.var_stat['nvar'] - 1] == solve
+
+
+        # assert stat == [len, deg, rg]
+
+
 class TestPolyList:
     def test_polylist(self):
         cipher.th = 5
@@ -203,7 +289,6 @@ class TestPolyList:
         summand2[0:2] = np.array([2, 3], dtype=np.int32)
         summand3 = np.zeros(cipher.max_deg, dtype=np.int32)
         summand3[0:2] = np.array([4, 5], dtype=np.int32)
-
 
         test_var_poly1.add_summands(summand1.reshape(1, cipher.max_deg))
         test_var_poly2.add_summands(summand2.reshape(1, cipher.max_deg))

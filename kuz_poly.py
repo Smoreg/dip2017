@@ -274,36 +274,57 @@ class VarSpace:
     """
     MAX_VARS = 100000
 
-    #TODO secret vars and max var num
-    def __init__(self, variables, , th, T, save_flag=False, stat_flag=False):
+    def __init__(self, variables, th, T, max_var_num=386, save_flag=False, stat_flag=False):
 
-        # check
         if DEBUG:
-            if not isinstance(variables, np.array):
-                raise self.VarSpaceException('BAd variables type {}'.format(type(variables)))
+            if not isinstance(variables, np.ndarray):
+                raise self.VarSpaceException('Bad variables type {}'.format(type(variables)))
+            if len(variables) != max_var_num:
+                raise self.VarSpaceException('Bad var len {} / {}'.format(len(variables), max_var_num))
 
         self.sf = save_flag and self._new_file()
         self.f_stat = stat_flag
         self.th = th
         self.T = T
 
-
         self.variables = self._init_vars(variables)
-        self.curr_var = np.max(self.variables)
+
+        self.var_stat = {
+            "len": 0,
+            "nvar": max_var_num,   #remeber -2
+            "rg": 0,
+        }
 
     def _new_file(self):
-        return open("VarSpace{}_{}".format(
-            hex(id(self))[2:], strftime("%Y%m%d_%H%M", gmtime())
-        ))
+        return open("saved_results/VarSpace_{}".format(strftime("%Y-%m-%d-%H-%M", gmtime())
+        ), "w")
 
     def _init_vars(self, variables):
-        """
-        :param variables:
-        :return:
-        """
         res = np.zeros(self.MAX_VARS, dtype=np.bool)
         res[:len(variables)] = variables
         return res
+
+    #XOR ---------------------------------
+    def new_var(self, poly):
+        """
+        Превращает полученный полином Жегалкина в новую переменную
+        :param poly: ZhegalkinPoly
+        :return: ZhegalkinPoly, [len, deg, rg]
+        """
+        pass
+
+    def group_monoms(self, summands):
+        """
+        Группирует мономы
+        :param summands: numpy.ndarray shape [th*2,, max_deg]
+        :return: list int, > 0 - номер группы. < 0 - не влезает
+        """
+        pass
+
+
+    #SBOX --------------------------------
+    def sbox_poly(self, poly_list):
+        pass
 
     class VarSpaceException(Exception):
         pass
@@ -327,6 +348,8 @@ class Kuznechik:
         self.secret_bits_mask = secret_bits_mask
         self.precalc = self._precalculate()
 
+        open_text = open_text.ljust(16, b'\x00')
+
         self.original_plaintext = np.unpackbits(np.fromstring(open_text, dtype=np.uint8)).astype(dtype=np.bool)
         self.original_key = np.unpackbits(np.fromstring(key, dtype=np.uint8)).astype(dtype=np.bool)
 
@@ -338,16 +361,17 @@ class Kuznechik:
 
         self.var_space = VarSpace(
             variables=np.hstack((
-                self.poly_plaintext.variables,
-                self.poly_key.variables
+                self.original_plaintext,
+                self.original_key
             )),
-            cipher=self,
-
+            th=self.th,
+            T=self.T,
         )
         if key_exp:
             self.full_key = self.key_expand()
         else:
-            self.full_key = None
+            simp_text = np.unpackbits(np.fromstring(b"\xa3"*16, dtype=np.uint8)).astype(dtype=np.bool)
+            self.full_key = [PolyList(variables=simp_text, th=self.th, cipher=self) for _ in range(10)]
 
     @staticmethod
     def narr_to_by_arr(arr, bin_flag=False):
