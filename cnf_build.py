@@ -1,15 +1,18 @@
 import numpy as np
+from kuz_poly import ZhegalkinPolynomial
+import mock
 DEBUG = True
+
 
 class CNF:
     pass
 
 
-
-def grouper(summands, th):
+def grouper(summands, T):
     # summands unique
     # sorted !
-    th = th
+    # filter too big
+    T = T
     groups = np.arange(len(summands))
 
     # Merge all
@@ -33,7 +36,7 @@ def grouper(summands, th):
         if ind_main in np.arange(active_flags.shape[0])[active_flags == True]:
             merge_score = np.zeros(len(summands)) - 1
             main = np.unique(summands[ind_main])
-            if len(main[main > 0]) >= th:
+            if len(main[main > 0]) >= T:
                 continue
             for ind_part in active_indexs:
                 if ind_main != ind_part:
@@ -41,8 +44,8 @@ def grouper(summands, th):
                     main = main[main > 0]
                     part = part[part > 0]
                     unite = np.unique(np.union1d(main, part))
-                    uniq_len = len(unite[unite > 0]) # free space
-                    if uniq_len > th:
+                    uniq_len = len(unite[unite > 0])  # free space
+                    if uniq_len > T:
                         merge_score[ind_part] = -1
                         continue
                     new_len = len(unite[unite > 0]) - len(main[main > 0])
@@ -53,7 +56,7 @@ def grouper(summands, th):
 
             if max(merge_score) >= 0:
                 m_arg = np.argmax(merge_score)
-                tmp_summand = np.zeros(summands.shape[1],dtype=summands.dtype)
+                tmp_summand = np.zeros(summands.shape[1], dtype=summands.dtype)
                 tmp_summand_vars = np.unique(np.union1d(summands[ind_main], summands[m_arg]))
                 tmp_summand[:len(tmp_summand_vars)] = tmp_summand_vars
                 summands[ind_main] = tmp_summand
@@ -67,12 +70,24 @@ def grouper(summands, th):
                         active_flags[num] = False
                         groups[num] = groups[ind_main]
 
-    #getgroups
+    # getgroups
     gr = np.unique(groups)
     a = dict()
     for i in gr:
         a[i] = np.unique(summands[groups == i])
     return groups, a
+
+
+def small_poly_to_cnf(poly, const=False):
+    """
+    Берет полином ращзмером меньше Т, и превращает его в КНФ методом Куайна — Мак-Класки (#TODO kmap)
+    :param poly: ZhegalkinPoly
+    :param const: const True/False, constat monom
+    :return: stat [len, deg, rg]
+    """
+
+
+
 
 
 if __name__ == '__main__':
@@ -85,9 +100,21 @@ if __name__ == '__main__':
             [6, 0, 0],
             [2, 0, 0]
         ])
-    s = np.c_[s, np.zeros_like(s), np.zeros_like(s), np.zeros_like(s)]
-    for num in range(3,6):
-        print(num)
-        res, a = grouper(s,num)
-        print(np.c_[s, res])
-        print(a)
+    s = np.c_[s, np.zeros_like(s), np.zeros_like(s), np.zeros_like(s)]  # fill with zeros
+
+    cipher_mock = mock.MagicMock()
+    cipher_mock.th = 5
+    cipher_mock.T = 12
+    cipher_mock.max_deg = 256
+
+    z = ZhegalkinPolynomial(cipher_mock)
+    l,h = s.shape
+    z.form[:l,:h] = s
+    small_poly_to_cnf(s)
+    # small_poly_to_cnf(s, True)
+    # s = np.c_[s, np.zeros_like(s), np.zeros_like(s), np.zeros_like(s)]
+    # for num in range(3,6):
+    #     print(num)
+    #     res, a = grouper(s,num)
+    #     print(np.c_[s, res])
+    #     print(a)
