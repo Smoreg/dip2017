@@ -5,33 +5,7 @@ import numpy as np
 import mock
 DEBUG = True
 
-class TruthTable:
-    def __init__(self, poly):
-        self.form = poly.form
-        self.const = poly.const
 
-        vars_names = poly.get_vars()
-
-        _co
-
-        for var in vars:
-            poly.solve_poly()
-
-    def _combinations(self, array, out=None):
-        dtype = array.dtype
-        # arrays = (array for x in array)
-        #
-        # n = np.prod([x.size for x in array])
-        # if out is None:
-        #     out = np.zeros([n, len(array)], dtype=dtype)
-
-        m = n / array[0].size
-        out[:,0] = np.repeat(array[0], m)
-        if array[1:]:
-            self._combinations(array[1:], out=out[0:m, 1:])
-            for j in range(1, array[0].size):
-                out[j*m:(j+1)*m,1:] = out[0:m,1:]
-        return out
 
 class ZhegalkinPolynomial:
     def __init__(self, cipher):
@@ -187,46 +161,26 @@ class ZhegalkinPolynomial:
     def is_const(self):
         return ~np.any(self.form)
 
-    def solve_poly(self, true_variables=np.array([], dtype=np.uint32), false_variables=np.array([], dtype=np.uint32)):
+    def solve_poly(self, true_variables, false_variables = None):
         """
-        :param true_variables: номера переменных равных 1
-        :param false_variables: -//- 0 необязательный
+        :param true_variables: bit mask true vars
         :return:
         """
         vars_poly = self.get_vars()
         if not any(vars_poly):
             return self.const
         else:
-            if DEBUG and not isinstance(true_variables, np.ndarray):
-                true_variables =
             if DEBUG:
-                keys = np.hstack([true_variables, false_variables])
-                diff = np.setdiff1d(vars_poly, keys, assume_unique=True)
-                if len(diff):
-                    raise self.ZhegalkinException('Unknown var(s) []'.format(diff))
+                if false_variables:
+                    keys = np.hstack([true_variables, false_variables])
+                    diff = np.setdiff1d(vars_poly, keys, assume_unique=True)
+                    if len(diff):
+                        raise self.ZhegalkinException('Unknown var(s) []'.format(diff))
             summands = self.get_summands()
             bool_vars = \
                 (np.in1d(summands, np.append([0, ], true_variables)).reshape(*summands.shape))
             bool_vars = np.logical_and.reduce(bool_vars, axis=1)
             return np.logical_xor.reduce(bool_vars, axis=0) ^ self.const
-
-        # OLD
-        # vars_poly = self.get_vars()
-        # if not any(vars_poly):
-        #     return self.const
-        # else:
-        #     if DEBUG and not isinstance(true_variables, np.ndarray):
-        #         true_variables =
-        #     if DEBUG:
-        #         keys = np.hstack([true_variables, false_variables])
-        #         diff = np.setdiff1d(vars_poly, keys, assume_unique=True)
-        #         if len(diff):
-        #             raise self.ZhegalkinException('Unknown var(s) []'.format(diff))
-        #     summands = self.get_summands()
-        #     bool_vars = \
-        #         (np.in1d(summands, np.append([0, ], true_variables)).reshape(*summands.shape))
-        #     bool_vars = np.logical_and.reduce(bool_vars, axis=1)
-        #     return np.logical_xor.reduce(bool_vars, axis=0) ^ self.const
 
     class ZhegalkinException(Exception):
         pass
