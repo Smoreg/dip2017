@@ -1,3 +1,6 @@
+# SPUP   - speedup
+# TO DO  - do
+
 from copy import deepcopy
 from time import gmtime, strftime
 
@@ -5,17 +8,15 @@ import numpy as np
 import mock
 DEBUG = True
 
-
-
 class ZhegalkinPolynomial:
-    def __init__(self, cipher):
+    def __init__(self, cipher, const =  False):
 
         self.cipher = cipher  # Шифр использующий данный класс
         self.th = cipher.th  # Максимальное число мономов (без константы)
         self.monom_max_deg = cipher.max_deg  # Максимальное число пермеенных в полиноме
 
         self.form = np.zeros((self.th * 2, self.monom_max_deg), dtype=np.int32)
-        self.const = False  # TODO speedup property set/get
+        self.const = const  # SPUP speedup property set/get
 
         # Legend
         # th = 4

@@ -9,14 +9,55 @@ DEBUG = True
 
 
 class CNF_builder:
-    pass
+    """
+    Класс для превращения полиномов в окломинимальные КНФ и получения их статистики
+    """
+
+    class TruthTable:
+        """
+        TrTab from poly
+        tt_left   tt_right
+        x y        x ^ y
+        0 0        0
+        0 1        1
+        1 0        1
+        1 1        0
+
+        """
+        def __init__(self, inp_poly):
+
+            self.form = inp_poly.form
+            self.const = inp_poly.const
+
+            vars_nums = np.unique(self.form)
+            vars_nums = vars_nums[vars_nums > 1]
+            vars_len = len(vars_nums)
+            if DEBUG and vars_len > 15:
+                raise self.TrTabException('Too many vars')
+
+            tt_left = np.array(list(product((1, 0), repeat=10)), dtype=np.bool)
+            res = []
+            for i in tt_left:
+                res.append(inp_poly.solve_poly(vars_nums[i]))
+            self.tt_right = np.array(res, dtype=np.bool)
+            if self.const:
+                self.tt_right = ~self.tt_right
+
+        class TrTabException(Exception):
+            pass
 
     @staticmethod
     def grouper(summands, T):
+        """
+        Группирует суманды
+        в группы с числом уникальных перменных меньше либо равных T
+        :param summands: Массив чисел
+        :param T:
+        :return:
+        """
         # summands unique
         # sorted !
         # filter too big
-        T = T
         groups = np.arange(len(summands))
 
         # Merge all
@@ -81,8 +122,7 @@ class CNF_builder:
             a[i] = np.unique(summands[groups == i])
         return groups, a
 
-    @staticmethod
-    def small_poly_to_cnf(poly, const=False):
+    def small_poly_to_cnf(self, poly, const=False):
         """
         Берет полином длинной меньше Т, и превращает его в КНФ методом Куайна — Мак-Класки (#TODO kmap)
         :param poly: ZhegalkinPoly
@@ -90,30 +130,10 @@ class CNF_builder:
         :return: stat [len, deg, rg]
         """
 
-        class TruthTable:
-            def __init__(self, inp_poly):
-
-                self.form = inp_poly.form
-                self.const = inp_poly.const
-
-                vars_nums = np.unique(self.form)
-                vars_nums = vars_nums[vars_nums > 1]
-                vars_len = len(vars_nums)
-                if DEBUG and vars_len > 15:
-                    raise self.TrTabException('Too many vars')
-
-                tt_left = np.array(list(product((1, 0), repeat=10)), dtype=np.bool)
-                res = []
-                for i in tt_left:
-                    res.append(inp_poly.solve_poly(vars_nums[i]))
-                self.tt_right = res  # np.array(res, dtype=np.bool)
-
-            class TrTabException(Exception):
-                pass
 
         # 1 poly to pknf
 
-        table = TruthTable(poly)
+        table = self.TruthTable(poly)
         p_cnf = np.where(~table.tt_right)[0]
 
         # 2 sknf to min knf
@@ -148,7 +168,7 @@ class CNF_builder:
                 current_group = groups.get(ones)
                 next_group = groups.get(ones.get(ones + 1))
                 if current_group and next_group:
-                    # Search implicants
+                    pass # Search implicants
 
         groups = dict()
         data = sorted(p_cnf, key=count_one)
@@ -156,33 +176,5 @@ class CNF_builder:
             g = [table.tt_left[c1] for c1 in g]
             groups[k] = g
         while True:
+            pass
 
-
-if __name__ == '__main__':
-    s = np.array(
-        [
-            [3, 4, 5],
-            [4, 6, 7],
-            [4, 5, 0],
-            [2, 5, 0],
-            [6, 0, 0],
-            [2, 0, 0]
-        ])
-    s = np.c_[s, np.zeros_like(s), np.zeros_like(s), np.zeros_like(s)]  # fill with zeros
-
-    cipher_mock = mock.MagicMock()
-    cipher_mock.th = 5
-    cipher_mock.T = 12
-    cipher_mock.max_deg = 256
-
-    z = ZhegalkinPolynomial(cipher_mock)
-    l, h = s.shape
-    z.form[:l, :h] = s
-    small_poly_to_cnf(s)
-    # small_poly_to_cnf(s, True)
-    # s = np.c_[s, np.zeros_like(s), np.zeros_like(s), np.zeros_like(s)]
-    # for num in range(3,6):
-    #     print(num)
-    #     res, a = grouper(s,num)
-    #     print(np.c_[s, res])
-    #     print(a)
