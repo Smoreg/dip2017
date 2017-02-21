@@ -12,55 +12,130 @@ th = 3
 T = 5
 
 
-# open_text = b'Some kuzcip test'
-# rand_key = b'\xfb\x04\xf6u?\xd6G\xaa\xe8E\x16\xc9OX\xed@\xeb(L\xf6{\xc3]\xadY\xf9"c\\\x19\x1c\x9f'
-# cipher = Kuznechik(T, th, open_text=open_text, key=rand_key, key_exp=False)
-
-# open_text = b'Some kuzcip test'
-# rand_key = b'\xfb\x04\xf6u?\xd6G\xaa\xe8E\x16\xc9OX\xed@\xeb(L\xf6{\xc3]\xadY\xf9"c\\\x19\x1c\x9f'
-# cipher = 1
-
-
 class TestCNF:
     @pytest.fixture
     def cipher(self):
         cipher_mock = mock.MagicMock()
         cipher_mock.th = 5
-        cipher_mock.T = 12
+        cipher_mock.T = 5
         cipher_mock.max_deg = 256
         return cipher_mock
 
     def test_grouper(self, cipher):
-        assert (1 == 1)
+        builder = CNF_builder(cipher)
+
+        def get_grouped(test_summands):
+            ts0, ts1 = test_summands.shape
+            z = np.zeros((ts0, T - ts1), dtype=np.uint32)
+            assert ts1 <= builder.cipher.T
+            test_summands = np.c_[test_summands, z]
+            return builder.grouper(test_summands)
+
+        # simple
+        result = get_grouped(
+            np.array([
+                [2, 3, 4, ],
+                [2, 3, 0, ],
+                [6, 0, 0, ],
+            ])
+        )
+        assert len(result) == 1
+        assert np.all(result[0] == np.array([0, 2, 3, 4, 6]))
+
+        # real
+
+        result = get_grouped(
+            np.array([
+                [0, 3, 5, 9, 2],
+                [0, 5, 6, 0, 0],
+                [8, 0, 0, 0, 0],
+            ])
+        )
+        assert len(result) == 1
+        assert np.all(result[0] == np.array([0, 2, 3, 4, 6]))
+
+
+        # #2 no diff
+        # test_summands = np.array([
+        #     [2, 3, 4, ],
+        # ])
+        # ts0, ts1 = test_summands.shape
+        # assert ts1 <= builder.cipher.T
+        #
+        # z = np.zeros((ts0, T - ts1), dtype=np.uint32)
+        # test_summands = np.c_[test_summands, z]
+        # result = builder.grouper(test_summands)
+        # assert result != test_summands
+        # #3 exceptions (too long, empty, not sorted, etc)
 
     def test_poly_to_cnf(self, cipher):
-        builder = CNF_builder()
+        builder = CNF_builder(cipher)
         s = np.array(
             [
                 [3, 4, 5],
-                [4, 6, 7],
-                [4, 5, 0],
                 [2, 5, 0],
-                [6, 0, 0],
-                [2, 0, 0]
+                [3, 5, 0],
+                [5, 0, 0],
+            ]
+        )
+
+        # 2345
+        # 0000 - 0
+        # 0001 - 1
+        # 0010 - 0
+        # 0011 - 1
+        # 0100 - 0
+        # 0101 - 0
+        # 0110 - 0
+        # 0111 - 1
+        # 1000 - 0
+        # 1001 - 0
+        # 1010 - 0
+        # 1011 - 0
+        # 1100 - 0
+        # 1101 - 1
+        # 1110 - 0
+        # 1111 - 0
+        res = [bool(x == '1') for x in '0101000100000100']
+
+        s = np.c_[s, np.zeros_like(s), np.zeros_like(s), np.zeros_like(s)]  # fill with zeros
+
+        z1 = ZhegalkinPolynomial(cipher)
+        l, h = s.shape
+        z1.form[:l, :h] = s
+
+        tt_good = builder.TruthTable(z1)
+
+        assert np.all(tt_good.tt_right == res)
+
+        z1.const ^= True
+        tt_good_c = builder.TruthTable(z1)
+
+        assert not np.any(tt_good_c.tt_right == tt_good.tt_right)
+
+        s = np.array(
+            [
+                [0, 0, 0],
             ])
         s = np.c_[s, np.zeros_like(s), np.zeros_like(s), np.zeros_like(s)]  # fill with zeros
 
-        z = ZhegalkinPolynomial(cipher)
+        z2 = ZhegalkinPolynomial(cipher)
         l, h = s.shape
-        z.form[:l, :h] = s
+        z2.form[:l, :h] = s
 
-        builder.TruthTable(z)
 
-        builder.small_poly_to_cnf(s)
-        builder.small_poly_to_cnf(s)
-        builder.small_poly_to_cnf(s, True)
+        # builder.small_poly_to_cnf(z)
+        # builder.small_poly_to_cnf(s)
+        # builder.small_poly_to_cnf(s, True)
         # s = np.c_[s, np.zeros_like(s), np.zeros_like(s), np.zeros_like(s)]
         # for num in range(3,6):
         #     print(num)
         #     res, a = grouper(s,num)
         #     print(np.c_[s, res])
         #     print(a)
+
+        # def test_stop(self):
+        #     assert (1 == 0)
 
 
 class TestTrTable:
@@ -72,9 +147,6 @@ class TestTrTable:
         cipher_mock.max_deg = 256
         poly = ZhegalkinPolynomial(cipher_mock)
         return poly
-
-    def test_init(self, poly):
-        assert (1 == 1)
 
 
 class TestPolyZhi:
@@ -170,8 +242,6 @@ class TestPolyZhi:
 
         # test_const_poly.set_const(1)
 
-
-
         summand1 = np.zeros(cipher.max_deg, dtype=np.int32)
         summand1[0:2] = np.array([2, 10], dtype=np.int32)
         summand2 = np.zeros(cipher.max_deg, dtype=np.int32)
@@ -183,8 +253,9 @@ class TestPolyZhi:
         test_var_poly2.add_summands(summand2.reshape(1, cipher.max_deg))
         test_var_poly3.add_summands(summand3.reshape(1, cipher.max_deg))
 
-        with pytest.raises(ZhegalkinPolynomial.ZhegalkinException):
-            test_var_poly1.solve_poly(true_variables=np.array([]))
+        res1 = test_var_poly1.solve_poly(true_variables=np.array([2, ]))
+        test_var_poly1.set_const(True)
+        assert ((not res1) == test_var_poly1.solve_poly(true_variables=np.array([2, ])))
         assert (test_var_poly2.solve_poly(true_variables=np.array([2, 3])))
         assert (not test_var_poly2.solve_poly(true_variables=np.array([3, ]), false_variables=np.array([2, ])))
         assert (test_var_poly3.solve_poly(true_variables=np.array([20, 5, 30])))
@@ -192,9 +263,6 @@ class TestPolyZhi:
 
         test_var_poly2.set_const(True)
         assert (not test_var_poly2.solve_poly(true_variables=np.array([2, 3])))
-
-        # print('---')
-        # print((test_var_poly_res).form)
 
 
 class TestVarSpace:
@@ -410,3 +478,11 @@ class TestKuznechik:
             assert test_kuz.narr_to_by_arr(i) == j, "Round key {} fail".format(num)
 
         assert (test_kuz.narr_to_by_arr(test_kuz.encrypt()) == bytearray(self.pygost_kuz.encrypt(self.open_text)))
+
+# open_text = b'Some kuzcip test'
+# rand_key = b'\xfb\x04\xf6u?\xd6G\xaa\xe8E\x16\xc9OX\xed@\xeb(L\xf6{\xc3]\xadY\xf9"c\\\x19\x1c\x9f'
+# cipher = Kuznechik(T, th, open_text=open_text, key=rand_key, key_exp=False)
+
+# open_text = b'Some kuzcip test'
+# rand_key = b'\xfb\x04\xf6u?\xd6G\xaa\xe8E\x16\xc9OX\xed@\xeb(L\xf6{\xc3]\xadY\xf9"c\\\x19\x1c\x9f'
+# cipher = 1

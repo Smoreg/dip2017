@@ -33,10 +33,14 @@ class ZhegalkinPolynomial:
             for summand in self.get_summands():
                 tmp = ''
                 for var in summand:
-                    tmp += "x{}".format(var)
-                res.append(tmp)
+                    if var:
+                        tmp += "x{}".format(var)
+                if tmp:
+                    res.append(tmp)
             res = " ⊕ ".join(res)
-            return "{} ^ {}".format(res, int(self.const))
+            if self.const:
+                res = "{} ⊕ {}".format(res, int(self.const))
+            return res
         else:
             return str(int(self.const))
 

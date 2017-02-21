@@ -1,9 +1,6 @@
 from itertools import product, groupby
 
-import mock
 import numpy as np
-
-from kuz_poly import ZhegalkinPolynomial
 
 DEBUG = True
 
@@ -12,6 +9,8 @@ class CNF_builder:
     """
     Класс для превращения полиномов в окломинимальные КНФ и получения их статистики
     """
+    def __init__(self, cipher):
+        self.cipher = cipher
 
     class TruthTable:
         """
@@ -24,6 +23,7 @@ class CNF_builder:
         1 1        0
 
         """
+
         def __init__(self, inp_poly):
 
             self.form = inp_poly.form
@@ -35,31 +35,32 @@ class CNF_builder:
             if DEBUG and vars_len > 15:
                 raise self.TrTabException('Too many vars')
 
-            tt_left = np.array(list(product((1, 0), repeat=10)), dtype=np.bool)
+            self.tt_left = np.array(list(product((1, 0), repeat=vars_len)), dtype=np.bool)
+            self.tt_left = np.flipud(self.tt_left)  # make tt_left[0] = [False, ... False]
             res = []
-            for i in tt_left:
+            for i in self.tt_left:
                 res.append(inp_poly.solve_poly(vars_nums[i]))
             self.tt_right = np.array(res, dtype=np.bool)
-            if self.const:
-                self.tt_right = ~self.tt_right
 
         class TrTabException(Exception):
             pass
 
-    @staticmethod
-    def grouper(summands, T):
+    def grouper(self, summands):
         """
         Группирует суманды
         в группы с числом уникальных перменных меньше либо равных T
         :param summands: Массив чисел
-        :param T:
-        :return:
+        :param T: максимальный deg в сумманде
+        :return: номера групп для суммандов
         """
+        # TODO
         # summands unique
         # sorted !
         # filter too big
-        groups = np.arange(len(summands))
+        # map
 
+        groups = np.arange(len(summands))
+        T = self.cipher.T
         # Merge all
         summands = np.copy(summands)
         active_flags = np.ones(len(summands), dtype=np.bool)
@@ -117,10 +118,10 @@ class CNF_builder:
 
         # getgroups
         gr = np.unique(groups)
-        a = dict()
+        result = dict()
         for i in gr:
-            a[i] = np.unique(summands[groups == i])
-        return groups, a
+            result[i] = np.unique(summands[groups == i])
+        return result
 
     def small_poly_to_cnf(self, poly, const=False):
         """
@@ -130,7 +131,6 @@ class CNF_builder:
         :return: stat [len, deg, rg]
         """
 
-
         # 1 poly to pknf
 
         table = self.TruthTable(poly)
@@ -139,42 +139,47 @@ class CNF_builder:
         # 2 sknf to min knf
         # Quine–McCluskey algorithm
 
-
-        # In [42]: expr2truthtable((x | y | z) & (~x | ~y | z))
-        # Out[42]:
-        # z y x
-        # 0 0 0 : 0
-        # 0 0 1 : 1
-        # 0 1 0 : 1
-        # 0 1 1 : 0
-        # 1 0 0 : 1
-        # 1 0 1 : 1
-        # 1 1 0 : 1
-        # 1 1 1 : 1
-
         def count_one(x):
             """
                Считает единицы в бинарном представлении х
             """
-            x = (x & 0x55555555) + ((x >> 1)  & 0x55555555)
-            x = (x & 0x33333333) + ((x >> 2)  & 0x33333333)
-            x = (x & 0x0f0f0f0f) + ((x >> 4)  & 0x0f0f0f0f)
-            x = (x & 0x00ff00ff) + ((x >> 8)  & 0x00ff00ff)
+            x = (x & 0x55555555) + ((x >> 1) & 0x55555555)
+            x = (x & 0x33333333) + ((x >> 2) & 0x33333333)
+            x = (x & 0x0f0f0f0f) + ((x >> 4) & 0x0f0f0f0f)
+            x = (x & 0x00ff00ff) + ((x >> 8) & 0x00ff00ff)
             x = (x & 0x0000ffff) + ((x >> 16) & 0x0000ffff)
             return x
 
-        def make_imlicants(groups):
-            for ones in range(max(groups.keys())):
-                current_group = groups.get(ones)
-                next_group = groups.get(ones.get(ones + 1))
-                if current_group and next_group:
-                    pass # Search implicants
+        def make_implicants(old_groups):
+            # импликанты для которых нашлись "пары" с 2 вместо -
+            new_groups = {num: [] for num in range(max(old_groups.keys()) + 1)}
+            end_implicants = []  # тупиковые ипмликанты
+
+            for num in old_groups.keys():
+                current_group = old_groups.get(num, 'Empty')
+                next_group = old_groups.get(num + 1, 'Empty')
+                if current_group != 'Empty' and next_group != 'Empty':
+                    for minterm in current_group:
+                        possible_pairs = next_group[np.all((next_group == 2) == (minterm == 2), axis=1)]
+                        possible_pairs = possible_pairs[np.all((minterm & possible_pairs) == minterm, axis=1)]
+                        if len(possible_pairs):
+                            for possible_pair in possible_pairs:
+                                tmp_copy = np.copy(possible_pair)
+                                tmp_copy[(tmp_copy - minterm) == 1] = 2
+                                new_groups[num].append(tmp_copy)
+                        else:
+                            end_implicants.append(minterm)
+
+            return np.array(new_groups), end_implicants
 
         groups = dict()
         data = sorted(p_cnf, key=count_one)
         for k, g in groupby(data, count_one):
-            g = [table.tt_left[c1] for c1 in g]
+            g = np.array([table.tt_left[c1].astype(np.uint8) for c1 in g])
             groups[k] = g
-        while True:
-            pass
 
+        print(make_implicants(groups))
+        # iter_num = 0
+        # while True:
+        #     iter_num += 1
+        #     groups, implicants = make_implicants(groups)
