@@ -3,19 +3,22 @@
 
 from copy import deepcopy
 from time import gmtime, strftime
+from cnf_build import CNF_builder
 
 import numpy as np
 import mock
+
 DEBUG = True
 
+
 class ZhegalkinPolynomial:
-    def __init__(self, cipher, const =  False):
+    def __init__(self, cipher, const=False):
 
         self.cipher = cipher  # Шифр использующий данный класс
         self.th = cipher.th  # Максимальное число мономов (без константы)
         self.monom_max_deg = cipher.max_deg  # Максимальное число пермеенных в полиноме
 
-        self.form = np.zeros((self.th * 2, self.monom_max_deg), dtype=np.int32)
+        self.form = np.zeros((self.th * 2, self.monom_max_deg * 2), dtype=np.int32)
         self.const = const  # SPUP speedup property set/get
 
         # Legend
@@ -51,25 +54,22 @@ class ZhegalkinPolynomial:
         # в любом случае константы xor ятся
         self_c = self.is_const()
         oth_c = other.is_const()
+        result = self
         if self_c or oth_c:
             # если один полином - константа
             if self_c and not oth_c:
                 self.form = np.copy(other.form)
             self.const ^= other.const
         else:
-
-            if self.get_vars_num() + other.get_vars_num() > self.monom_max_deg:
-                self.cipher  # .('MORE')  # TODO new var
+            state, tmp_form = self.xor_summands(other)
+            if state == 'need new':
+                result = self.cipher.var_space.xor(self, tmp_form, self.const ^ other.const)
+            elif state == 'keep':
+                self.form = tmp_form
+                self.const ^= other.const
             else:
-                state, tmp_form = self.xor_summands(other)
-                if state == 'need new':
-                    print('MORE')  # TODO new var
-                elif state == 'keep':
-                    self.form = tmp_form
-                    self.const ^= other.const
-                else:
-                    raise self.ZhegalkinException('Bad xor state {}'.format(state))
-        return self
+                raise self.ZhegalkinException('Bad xor state {}'.format(state))
+        return result
 
     def __xor__(self, other):
         res = deepcopy(self)
@@ -108,7 +108,7 @@ class ZhegalkinPolynomial:
         else:
             new_summands = []
 
-        if len(new_summands) > self.th:
+        if len(new_summands) > self.th or self.get_vars_num() + other.get_vars_num() > self.monom_max_deg:
             return 'need new', new_summands
         else:
             res = np.zeros_like(self.form)
@@ -166,7 +166,7 @@ class ZhegalkinPolynomial:
     def is_const(self):
         return ~np.any(self.form)
 
-    def solve_poly(self, true_variables, false_variables = None):
+    def solve_poly(self, true_variables, false_variables=None):
         """
         :param true_variables: bit mask true vars
         :return:
@@ -189,7 +189,6 @@ class ZhegalkinPolynomial:
 
     class ZhegalkinException(Exception):
         pass
-
 
 
 class PolyList:
@@ -279,7 +278,7 @@ class VarSpace:
     """
     MAX_VARS = 100000
 
-    def __init__(self, variables, th, T, max_var_num=386, save_flag=False, stat_flag=False):
+    def __init__(self, variables, cipher, max_var_num=386, save_flag=False, stat_flag=False):
 
         if DEBUG:
             if not isinstance(variables, np.ndarray):
@@ -287,49 +286,56 @@ class VarSpace:
             if len(variables) != max_var_num - 2:
                 raise self.VarSpaceException('Bad var len {} / {}'.format(len(variables), max_var_num))
 
+        self.cnf_builder = CNF_builder(cipher)
         self.sf = save_flag and self._new_file()
         self.f_stat = stat_flag
-        self.th = th
-        self.T = T
-
-        self.variables = self._init_vars(variables)
+        self.th = cipher.th
+        self.T = cipher.T
+        self.cipher = cipher
+        self.variables = self._init_vars(variables)  # self.variables[3] = x3
 
         self.var_stat = {
             "len": 0,
-            "nvar": max_var_num,   #remeber -2
+            "nvar": max_var_num,
             "rg": 0,
         }
 
     def _new_file(self):
         return open("saved_results/VarSpace_{}".format(strftime("%Y-%m-%d-%H-%M", gmtime())
-        ), "w")
+                                                       ), "w")
 
     def _init_vars(self, variables):
         res = np.zeros(self.MAX_VARS, dtype=np.bool)
-        res[:len(variables)] = variables
+        res[2:len(variables) + 2] = variables
         return res
 
-    #XOR ---------------------------------
-    def new_var(self, poly):
-        """
-        Превращает полученный полином Жегалкина в новую переменную
-        :param poly: ZhegalkinPoly
-        :return: ZhegalkinPoly, [len, deg, rg]
-        """
-        pass
+    def make_new_var(self, poly):
+        true_vars = np.where(self.variables[2:self.var_stat['nvar']] == 1)[0] + 2  # names of vars equals 1
+        res = poly.solve_poly(self.variables, true_variables=true_vars)
+        self.variables[self.var_stat['nvar']] = res
+        self.var_stat['nvar'] += 1
 
-    def group_monoms(self, summands):
+    # XOR ---------------------------------
+    def xor(self, tmp_form, const):
         """
-        Группирует мономы
-        :param summands: numpy.ndarray shape [th*2,, max_deg]
-        :return: list int, > 0 - номер группы. < 0 - не влезает
+        В процессе операции создаются дополнительные переменные
+        :param tmp_form: форма созданная в результате xor двух полиномов. Обычно должна
+         создавать xor_summands
+        :param const: Константа в фоме
+        :return: статистика
         """
-        pass
+        new_poly = ZhegalkinPolynomial(self.cipher, const=const)
+        new_poly.form[:tmp_form.shape[0]] = tmp_form
+        cnf_stat = self.cnf_builder.small_poly_to_cnf(new_poly)
+        new_var = self.var_stat['nvar']
+        self.make_new_var(new_poly)
+        res_poly = ZhegalkinPolynomial(self.cipher, const=const)
+        res_poly.form[:tmp_form.shape[0]] = tmp_form
+        return res_poly, cnf_stat
 
-
-    #SBOX --------------------------------
+    # SBOX --------------------------------
     def sbox_poly(self, poly_list):
-        pass
+        pass  # TODO
 
     class VarSpaceException(Exception):
         pass
@@ -338,6 +344,7 @@ class VarSpace:
 class Kuznechik:
     var_space = None
     max_deg = 256
+
     def __init__(self, T, th, open_text, key, secret_bits_mask=np.array([False] * (256 + 128)), key_exp=True):
         """
 
@@ -368,13 +375,12 @@ class Kuznechik:
                 self.original_plaintext,
                 self.original_key
             )),
-            th=self.th,
-            T=self.T,
+            cipher=self
         )
         if key_exp:
             self.full_key = self.key_expand()
         else:
-            simp_text = np.unpackbits(np.fromstring(b"\xa3"*16, dtype=np.uint8)).astype(dtype=np.bool)
+            simp_text = np.unpackbits(np.fromstring(b"\xa3" * 16, dtype=np.uint8)).astype(dtype=np.bool)
             self.full_key = [PolyList(variables=simp_text, th=self.th, cipher=self) for _ in range(10)]
 
     @staticmethod

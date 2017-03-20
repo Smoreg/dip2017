@@ -45,7 +45,7 @@ class CNF_builder:
         class TrTabException(Exception):
             pass
 
-    def grouper(self, summands):
+    def _grouper(self, summands):
         """
         Группирует суманды
         в группы с числом уникальных перменных меньше либо равных T
@@ -53,11 +53,6 @@ class CNF_builder:
         :param T: максимальный deg в сумманде
         :return: номера групп для суммандов
         """
-        # TODO
-        # summands unique
-        # sorted !
-        # filter too big
-        # map
 
         groups = np.arange(len(summands))
         T = self.cipher.T
@@ -67,9 +62,9 @@ class CNF_builder:
 
         for num, _ in enumerate(summands):
             if active_flags[num]:
-                tmp_gr = np.where((groups != groups[num]))[0]
-                tmp_gr = tmp_gr[tmp_gr > num]
-                for num2 in tmp_gr:
+                other_gr = np.where((groups != groups[num]))[0] # groups diff from current target
+                other_gr = other_gr[other_gr > num]
+                for num2 in other_gr:
                     if np.all(np.in1d(summands[num2][summands[num2] > 0], summands[num])):
                         active_flags[num2] = False
                         groups[num2] = groups[num]
@@ -84,8 +79,8 @@ class CNF_builder:
                 main = np.unique(summands[ind_main])
                 if len(main[main > 0]) >= T:
                     continue
-                for ind_part in active_indexs:
-                    if ind_main != ind_part:
+                for ind_part in np.arange(active_flags.shape[0])[active_flags == True]:
+                    if ind_main < ind_part:
                         part = np.unique(summands[ind_part])
                         main = main[main > 0]
                         part = part[part > 0]
@@ -104,6 +99,7 @@ class CNF_builder:
                     m_arg = np.argmax(merge_score)
                     tmp_summand = np.zeros(summands.shape[1], dtype=summands.dtype)
                     tmp_summand_vars = np.unique(np.union1d(summands[ind_main], summands[m_arg]))
+                    tmp_summand_vars = tmp_summand_vars[tmp_summand_vars > 0]
                     tmp_summand[:len(tmp_summand_vars)] = tmp_summand_vars
                     summands[ind_main] = tmp_summand
                     groups[groups == groups[m_arg]] = groups[ind_main]
@@ -117,11 +113,13 @@ class CNF_builder:
                             groups[num] = groups[ind_main]
 
         # getgroups
-        gr = np.unique(groups)
+        _, inverse = np.unique(groups, return_inverse=True)
+        groups = inverse
         result = dict()
-        for i in gr:
+        for i in groups:
             result[i] = np.unique(summands[groups == i])
-        return result
+        return result, groups
+
 
     def small_poly_to_cnf(self, poly, const=False):
         """

@@ -29,10 +29,10 @@ class TestCNF:
             z = np.zeros((ts0, T - ts1), dtype=np.uint32)
             assert ts1 <= builder.cipher.T
             test_summands = np.c_[test_summands, z]
-            return builder.grouper(test_summands)
+            return builder._grouper(test_summands)
 
         # simple
-        result = get_grouped(
+        result, _ = get_grouped(
             np.array([
                 [2, 3, 4, ],
                 [2, 3, 0, ],
@@ -42,31 +42,61 @@ class TestCNF:
         assert len(result) == 1
         assert np.all(result[0] == np.array([0, 2, 3, 4, 6]))
 
-        # real
+        # real simple
 
-        result = get_grouped(
+        result, _ = get_grouped(
             np.array([
                 [0, 3, 5, 9, 2],
                 [0, 5, 6, 0, 0],
                 [8, 0, 0, 0, 0],
             ])
         )
+        assert len(result) == 2
+
+        big_sum = [[0, 3, 5, 9, 2],
+                   [0, 5, 6, 0, 0],
+                   [8, 0, 0, 0, 0],
+                   [0, 0, 5, 4, 7],
+                   [0, 0, 5, 8, 0],
+                   [5, 0, 4, 3, 7],
+                   [9, 10, 5, 0, 0],
+                   [9, 8, 5, 6, 0],
+                   [2, 5, 8, 0, 3],
+                   [6, 2, 0, 0, 7],
+                   [0, 0, 3, 6, 0],
+                   [6, 4, 9, 5, 8],
+                   [3, 0, 4, 2, 9],
+                   [0, 3, 2, 4, 0],
+                   [3, 0, 6, 0, 9],
+                   [8, 0, 7, 0, 6],
+                   [9, 3, 0, 0, 10],
+                   [0, 9, 7, 4, 0],
+                   [10, 4, 2, 6, 0],
+                   [6, 0, 2, 3, 10]
+                   ]
+
+        result1, groups1 = get_grouped(
+            np.array(big_sum)
+        )
+        result2, groups2 = get_grouped(
+            np.array(big_sum * 7)
+        )
+        assert len(result1) == len(result2)
+
+        check_dict = {gr_num: [] for gr_num in result2.keys()}
+        res_eva = True
+        for num, summand in enumerate(big_sum * 7):
+            res_eva &= np.all(np.in1d(summand, result2[groups2[num]]))
+            check_dict[groups2[num]].extend(list(summand))
+        result, gr = get_grouped(
+            np.array([
+                [10, 3, 5, 9, 2],
+            ])
+        )
         assert len(result) == 1
-        assert np.all(result[0] == np.array([0, 2, 3, 4, 6]))
 
-
-        # #2 no diff
-        # test_summands = np.array([
-        #     [2, 3, 4, ],
-        # ])
-        # ts0, ts1 = test_summands.shape
-        # assert ts1 <= builder.cipher.T
-        #
-        # z = np.zeros((ts0, T - ts1), dtype=np.uint32)
-        # test_summands = np.c_[test_summands, z]
-        # result = builder.grouper(test_summands)
-        # assert result != test_summands
         # #3 exceptions (too long, empty, not sorted, etc)
+        # TODO
 
     def test_poly_to_cnf(self, cipher):
         builder = CNF_builder(cipher)
@@ -289,81 +319,81 @@ class TestVarSpace:
                 original_plaintext,
                 original_key
             )),
-            th=cipher.th,
-            T=cipher.T,
+            cipher=cipher,
             save_flag=True
         )
 
     def test_init(self, vs, cipher):
         var_space = vs
 
-        assert var_space.variables[(np.where(cipher.original_key == 1) + 2)[5]]
-        assert not var_space.variables[(np.where(cipher.original_key == 0) + 2)[5]]
+        assert np.all(var_space.variables[:128] == cipher.original_plaintext)
         assert isinstance(var_space.sf, io.IOBase)
 
     def test_xor(self, vs, cipher):
         xor_poly = ZhegalkinPolynomial(cipher)
-        xor_poly.form[:6, :3] = np.array(
-            [
-                [3, 4, 5],
-                [4, 5, 0],
-                [2, 5, 0],
-                [6, 0, 0],
-                [4, 6, 7],
-                [2, 0, 0]
-            ])
-        true_vars = np.where(cipher.original_key == 1) + 2
-        solve = xor_poly.solve_poly(true_vars)
+        xor_poly.form[:7, :5] = np.array(
+            [[0, 0, 3, 4, 5],
+             [0, 0, 0, 2, 8],
+             [0, 0, 3, 4, 8],
+             [0, 0, 4, 5, 6],
+             [0, 3, 4, 5, 9],
+             [0, 0, 2, 4, 8],
+             [0, 0, 2, 3, 9],
+             ])
 
-        group1 = [0, 1, 2, 5]
-        group2 = [3, 4]
+        vs.xor(xor_poly.form, const=False)
 
-        groups = vs.group_monoms(summands=xor_poly.form)
-
-        group1 = [groups[i] for i in group1]
-        group2 = [groups[i] for i in group2]
-
-        assert group1[1:] == group1[:-1]
-        assert group2[1:] == group2[:-1]
-        assert min(groups) >= 0
-
-        xor_res, stat = vs.new_var(xor_poly)
-
-        assert xor_res.form[0, 0] != vs.var_stat['nvar'] - 1
-        assert np.all(xor_res.form.ravel()[1:] == 0)
-        assert vs.variables[vs.var_stat['nvar'] - 1] == solve
-
-        # With long
-        xor_poly = ZhegalkinPolynomial(cipher)
-        xor_poly.form[0, :8] = np.array(
-            [2, 3, 4, 5, 6, 7, 8, 9])
-        #       [4, 5, 0],
-        #       [2, 5, 0],
-        #       [6, 0, 0],
-        #       [4, 6, 7],
-        #       [2, 0, 0]
-
-        true_vars = np.where(cipher.original_key == 1) + 2
-        solve = xor_poly.solve_poly(true_vars)
-
-        group1 = [1, 2, 5]
-        group2 = [3, 4]
-        group_min = [0]
-
-        groups = vs.group_monoms(summands=xor_poly.form)
-
-        group_min = [groups[i] for i in group_min]
-        assert max(group_min) < 0
-        assert group_min[1:] == group_min[:-1]
-
-        xor_res, stat = vs.new_var(xor_poly)
-
-        assert xor_res.form[0, 0] != vs.var_stat['nvar'] - 1
-        assert np.all(xor_res.form.ravel()[1:] == 0)
-        assert vs.variables[vs.var_stat['nvar'] - 1] == solve
+        # true_vars = np.where(cipher.original_key == 1)[0] + 2
+        # solve = xor_poly.solve_poly(true_vars)
 
 
-        # assert stat == [len, deg, rg]
+
+#
+# groups = vs.cnf_builder._grouper(summands=xor_poly.form)
+#
+# group1 = [groups[i] for i in group1]
+# group2 = [groups[i] for i in group2]
+#
+# assert group1[1:] == group1[:-1]
+# assert group2[1:] == group2[:-1]
+# assert min(groups) >= 0
+#
+# xor_res, stat = vs.new_var(xor_poly)
+#
+# assert xor_res.form[0, 0] != vs.var_stat['nvar'] - 1
+# assert np.all(xor_res.form.ravel()[1:] == 0)
+# assert vs.variables[vs.var_stat['nvar'] - 1] == solve
+#
+# # With long
+# xor_poly = ZhegalkinPolynomial(cipher)
+# xor_poly.form[0, :8] = np.array(
+#     [2, 3, 4, 5, 6, 7, 8, 9])
+# #       [4, 5, 0],
+# #       [2, 5, 0],
+# #       [6, 0, 0],
+# #       [4, 6, 7],
+# #       [2, 0, 0]
+#
+# true_vars = np.where(cipher.original_key == 1) + 2
+# solve = xor_poly.solve_poly(true_vars)
+#
+# group1 = [1, 2, 5]
+# group2 = [3, 4]
+# group_min = [0]
+#
+#
+# group_min = [groups[i] for i in group_min]
+# assert max(group_min) < 0
+# assert group_min[1:] == group_min[:-1]
+#
+# xor_res, stat = vs.new_var(xor_poly)
+#
+# assert xor_res.form[0, 0] != vs.var_stat['nvar'] - 1
+# assert np.all(xor_res.form.ravel()[1:] == 0)
+# assert vs.variables[vs.var_stat['nvar'] - 1] == solve
+#
+#
+# # assert stat == [len, deg, rg]
 
 
 class TestPolyList:
