@@ -1,12 +1,15 @@
 import io
+import json
+import random
 
 import mock
 import numpy as np
 import pytest
 from pygost.gost3412 import GOST3412Kuz
 
-from cnf_build import CNF_builder
-from kuz_poly import ZhegalkinPolynomial, Kuznechik, VarSpace, PolyList
+from ciphers import Kuznechik
+from transform.bool_structs import ZhegalkinPolynomial, VarSpace, PolyList, SboxPolyTransform
+from transform.cnf_transformations import CNF_builder
 
 th = 3
 T = 5
@@ -347,7 +350,6 @@ class TestVarSpace:
         # solve = xor_poly.solve_poly(true_vars)
 
 
-
 #
 # groups = vs.cnf_builder._grouper(summands=xor_poly.form)
 #
@@ -446,7 +448,7 @@ class TestPolyList:
         assert ~np.any(test_list_not_const.solve_list(true_variables=vars_numbs)[vars_not_const <= 1])
 
     def test_polylist_xor(self, cipher):
-        na = Kuznechik.narr_to_by_arr
+        na = Kuznechik._narr_to_by_arr
         cipher.th = 5
         T = 5
 
@@ -505,9 +507,10 @@ class TestKuznechik:
 
         for num, ij in enumerate(zip(test_kuz.full_key, self.pygost_kuz.ks)):
             i, j = ij
-            assert test_kuz.narr_to_by_arr(i) == j, "Round key {} fail".format(num)
+            assert test_kuz._narr_to_by_arr(i) == j, "Round key {} fail".format(num)
 
-        assert (test_kuz.narr_to_by_arr(test_kuz.encrypt()) == bytearray(self.pygost_kuz.encrypt(self.open_text)))
+        assert (test_kuz._narr_to_by_arr(test_kuz.encrypt()) == bytearray(self.pygost_kuz.encrypt(self.open_text)))
+
 
 # open_text = b'Some kuzcip test'
 # rand_key = b'\xfb\x04\xf6u?\xd6G\xaa\xe8E\x16\xc9OX\xed@\xeb(L\xf6{\xc3]\xadY\xf9"c\\\x19\x1c\x9f'
@@ -516,3 +519,78 @@ class TestKuznechik:
 # open_text = b'Some kuzcip test'
 # rand_key = b'\xfb\x04\xf6u?\xd6G\xaa\xe8E\x16\xc9OX\xed@\xeb(L\xf6{\xc3]\xadY\xf9"c\\\x19\x1c\x9f'
 # cipher = 1
+
+class TestSbox:
+    def test_sbox_main(self):
+        PI = bytearray((
+            252, 238, 221, 17, 207, 110, 49, 22, 251, 196, 250, 218, 35, 197, 4, 77,
+            233, 119, 240, 219, 147, 46, 153, 186, 23, 54, 241, 187, 20, 205, 95, 193,
+            249, 24, 101, 90, 226, 92, 239, 33, 129, 28, 60, 66, 139, 1, 142, 79, 5,
+            132, 2, 174, 227, 106, 143, 160, 6, 11, 237, 152, 127, 212, 211, 31, 235,
+            52, 44, 81, 234, 200, 72, 171, 242, 42, 104, 162, 253, 58, 206, 204, 181,
+            112, 14, 86, 8, 12, 118, 18, 191, 114, 19, 71, 156, 183, 93, 135, 21, 161,
+            150, 41, 16, 123, 154, 199, 243, 145, 120, 111, 157, 158, 178, 177, 50, 117,
+            25, 61, 255, 53, 138, 126, 109, 84, 198, 128, 195, 189, 13, 87, 223, 245,
+            36, 169, 62, 168, 67, 201, 215, 121, 214, 246, 124, 34, 185, 3, 224, 15,
+            236, 222, 122, 148, 176, 188, 220, 232, 40, 80, 78, 51, 10, 74, 167, 151,
+            96, 115, 30, 0, 98, 68, 26, 184, 56, 130, 100, 159, 38, 65, 173, 69, 70,
+            146, 39, 94, 85, 47, 140, 163, 165, 125, 105, 213, 149, 59, 7, 88, 179, 64,
+            134, 172, 29, 247, 48, 55, 107, 228, 136, 217, 231, 137, 225, 27, 131, 73,
+            76, 63, 248, 254, 141, 83, 170, 144, 202, 216, 133, 97, 32, 113, 103, 164,
+            45, 43, 9, 91, 203, 155, 37, 208, 190, 229, 108, 82, 89, 166, 116, 210, 230,
+            244, 180, 192, 209, 102, 175, 194, 57, 75, 99, 182,
+        ))
+        test_instance = SboxPolyTransform(sbox=PI)
+        assert test_instance
+
+    def test_sbox_rand(self):
+        rand_sbox = bytearray((
+            3, 1, 2, 0
+        ))
+
+        test_instance2 = SboxPolyTransform(sbox=rand_sbox)
+        assert np.all(
+            test_instance2.general_polys[0].form == \
+            [np.array([1, 0], dtype=np.int32),
+             np.array([0, 0], dtype=np.int32),
+             np.array([0, 0], dtype=np.int32),
+             np.array([0, 0], dtype=np.int32)]
+        )
+        assert np.all(
+            test_instance2.general_polys[1].form == \
+            [np.array([2, 0], dtype=np.int32),
+             np.array([0, 0], dtype=np.int32),
+             np.array([0, 0], dtype=np.int32),
+             np.array([0, 0], dtype=np.int32)])
+
+    def test_sbox_true_rand(self):
+        # sbox_size = random.randint(2, 8)
+        sbox_size = 3
+        sbox = bytearray(list(range(2 ** sbox_size)))
+        random.shuffle(sbox)
+        test_instance3 = SboxPolyTransform(sbox)
+        assert test_instance3
+
+        for num, bit_vec in enumerate(sbox):
+            bit_vec_norm = [int(x) for x in list(bin(num)[2:].rjust(sbox_size, '0'))]
+            bit_res_norm = [int(x) for x in list(bin(bit_vec)[2:].rjust(sbox_size, '0'))]
+            assert bit_res_norm == test_instance3.vector_solve(bit_vec_norm)
+
+
+        res = [[] for _ in range(sbox_size)]
+        for c1 in range(2 ** sbox_size):
+            # TODO нормальный привод в битовому списку
+            bit_vector = np.array([int(x) for x in list(bin(c1)[2:].rjust(sbox_size, '0'))])
+            for num, poly in enumerate(test_instance3.general_polys):
+                res[num].append(
+                    int(
+                        poly.solve_poly(true_variables=np.where(bit_vector == 1)[0])
+                    )
+                )
+            # res = [''.join(x) for x in res]
+            print(json.dumps(res))
+        a = np.array(res)
+
+        print(123)
+            # x2 + 1
+            # 1 + x1 + x1x2
