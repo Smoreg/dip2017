@@ -124,6 +124,9 @@ class FreeZhegalkinPolynomial:
             bool_vars = np.logical_and.reduce(bool_vars, axis=1)
             return np.logical_xor.reduce(bool_vars, axis=0) ^ self.const
 
+    class ZhegalkinException(Exception):
+        pass
+
 
 class ZhegalkinPolynomial(FreeZhegalkinPolynomial):
     def __init__(self, cipher, const=False):
@@ -198,9 +201,6 @@ class ZhegalkinPolynomial(FreeZhegalkinPolynomial):
             if len(new_summands):
                 res[:len(new_summands)] = new_summands
             return 'keep', res
-
-    class ZhegalkinException(Exception):
-        pass
 
 
 class PolyList:
@@ -357,19 +357,23 @@ class SboxPolyTransform:
     """
     Данный класс позволяет преобразовать один PolyList в другой
     в соответвии с данным при инициализации Sbox. 
+    
+    :argument general_polys: - list of  FreeZhegalkinPolynomial
+    
     """
 
     def __init__(self, sbox):
         """
-        :param sbox: Полный массив входов-выходов sbox
-        :example bytearray((0, 3, 1, 2,)) 
+        Инициация sbox и создание списка полиномов general_polys для обработки каждого байта
+        :param sbox: Полный массив входов-выходов sbox bytearray((0, 3, 1, 2,))
+        :type sbox: bytearray 
         """
         tmp_len = log2(len(sbox))
         if not tmp_len.is_integer():
             raise self.SboxException('Bad len')
         else:
-            self.len = int(tmp_len)
-        if max(sbox) > 2 ** self.len - 1:
+            self._len = int(tmp_len)
+        if max(sbox) > 2 ** self._len - 1:
             raise self.SboxException('Bad sbox')
         self.sbox = sbox
         self.general_polys = self._get_general(sbox)
@@ -385,11 +389,11 @@ class SboxPolyTransform:
         truth_table = []
 
         for n, i in enumerate(sbox):
-            a1 = bin(n)[2:].rjust(self.len, '0')
-            a2 = bin(i)[2:].rjust(self.len, '0')
+            a1 = bin(n)[2:].rjust(self._len, '0')
+            a2 = bin(i)[2:].rjust(self._len, '0')
             truth_table.append((a1, a2))
 
-        for bit_num in range(self.len):
+        for bit_num in range(self._len):
             tmp_truth_table = [(x[0], int(x[1][bit_num])) for x in truth_table]
             general_polys.append(self._truth_table_to_poly(tmp_truth_table))
 
@@ -397,7 +401,7 @@ class SboxPolyTransform:
 
     def _truth_table_to_poly(self, tt):
 
-        tt_groups = {num_ones: [] for num_ones in range(self.len + 1)}
+        tt_groups = {num_ones: [] for num_ones in range(self._len + 1)}
         for i in tt:
             tt_groups[i[0].count("1")].append(i)
 
@@ -411,13 +415,13 @@ class SboxPolyTransform:
                             res ^= poly_coeffs[inner_elem[0]]
                 poly_coeffs[elem[0]] = res
 
-        const = poly_coeffs['0' * self.len]
-        form = np.zeros((2 ** self.len, self.len), dtype=np.int32)
+        const = poly_coeffs['0' * self._len]
+        form = np.zeros((2 ** self._len, self._len), dtype=np.int32)
         res_vestors = []
         for bit_combination in sorted(poly_coeffs.keys())[1:]:
             if poly_coeffs[bit_combination]:
-                summand = [num + 1 for num, elem in enumerate(bit_combination.rjust(self.len, '0')) if int(elem)]
-                summand.extend([0] * (self.len - len(summand)))
+                summand = [num + 1 for num, elem in enumerate(bit_combination.rjust(self._len, '0')) if int(elem)]
+                summand.extend([0] * (self._len - len(summand)))
                 res_vestors.append(
                     np.array(summand)
                 )
@@ -425,28 +429,52 @@ class SboxPolyTransform:
         form[:res_matrix.shape[0]] = res_matrix
         return FreeZhegalkinPolynomial(form, const)
 
-    def poly_list_tranform(self, polylist, varspace):
+    def __len__(self):
+        return self._len
+
+    def poly_list_transform(self, polylist, varspace):
         """
-        преобразует лист полиномов в другой согласно sbox
+        Преобразует лист полиномов в другой согласно sbox
         Для новых переменных используется varspace
         :param polylist: экземпляр PolyList который будет преобразован 
         :param varspace: экземпляр VarSpace для создания новых переменных
         :return: экземпляр PolyList после sbox преобразования
         """
-    #
-    # def vector_solve(self, bin_vect):
-    #     """
-    #     TODO что это?
-    #     :param bin_vect:
-    #     :return:
-    #     """
-    #     if len(bin_vect) != self.len:
-    #         raise self.SboxException('Solving vector bad len')
-    #     true_vals = np.where(np.array(bin_vect) == 1)[0] + 1
-    #     res = []
-    #     for poly in self.general_polys:
-    #         res.append(poly.solve_poly(true_variables=true_vals))
-    #     return res
+
+        if len(polylist) != len(self):
+            raise self.SboxException('PolyList bad len')
+        res = []
+        for num, general_poly in enumerate(self.general_polys):
+            res.append(
+                Transformation.polys_superimposition(general_poly, polylist, varspace)
+            )
+
 
     class SboxException(Exception):
         pass
+
+
+class Transformation:
+    """
+    В класс помещены статические методы для преобразования булевых структур описанных в модуле
+    """
+
+    @staticmethod
+    def polys_superimposition(general_poly, polylist, varspace=None):
+        """
+        суперпозиция
+        f(x1,y1,z1), [f1(x,y,z),f2(x,y,z),f3(x,y,z)] => f(f1,f2,f3) => sf(x,y,z) 
+        :param general_poly: f 
+        :type general_poly: FreeZhegalkinPolynomial 
+        :param polylist: f1, f2, f3
+        :type polylist: PolyList 
+        :param varspace: пространство имен если понадобится создавать новые переменные
+        :type varspace: VarSpace
+        
+        :return new_poly: новый сформированный в процессе преобразования полином
+        :rtype new_poly: ZhegalkinPolynomial
+        """
+        for i in general_poly.form():
+            pass
+
+
